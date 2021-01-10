@@ -43,6 +43,13 @@ using std::vector;
 struct TableEntryTest : public Test {
 };
 
+static ::amqp_bytes_t bytes(const char* v) noexcept {
+  return ::amqp_bytes_t {
+    .len = ::strlen(v),
+    .bytes = const_cast<char*>(v)
+  };
+}
+
 TEST_F(TableEntryTest, Construction) {
   TableEntry t0("key", 1);
   TableEntry t1(move(t0));

@@ -28,17 +28,11 @@ int main() {
 
   do {
     try {
-      const auto& result =  connection.consume(std::chrono::seconds(1));
-      switch(result.index()) {
-        case Connection::TimeoutIdx:
-          cout << "timeout" << endl;
-          break;
-        case Connection::EnvelopeIdx:
-          cout << "Received: " << std::get<Connection::EnvelopeIdx>(result).body() << endl;
-          break;
-        default:
-          cout << "Unexpected result received: " << result.index() << endl;
-          break;
+      if (!connection.consumeEnvelope(std::chrono::seconds(1), [&channel] (Envelope envelope) {
+          cout << "Received: " << envelope.body() << endl;
+          if (0 != channel.ack(envelope->delivery_tag, false)) {
+            cout << "Failed to acknowledge envelope!" << endl;}})) {
+        cout << "timeout" << endl;
       }
    } catch(rmqcxx::Exception& ex) {
       cerr << "Failed: " << ex.what() << endl;

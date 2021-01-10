@@ -238,23 +238,29 @@ TEST_F(ConnectionTest, ConsumeEnvelope) {
   EXPECT_CALL(amqp, consume_message(connPtr, _, Pointee(consumeTv), 0))
     .WillOnce(DoAll(SaveArg<1>(&envelope), SetArgPointee<1>(amqp_envelope_t{.channel = 1}),
       Return(amqp_rpc_reply_t{.reply_type = AMQP_RESPONSE_NORMAL })));
-  const auto& result = conn.consume(consumeTimeout);
-  EXPECT_EQ(result.index(), 1);
-  const auto& env = std::get<1>(result);
-  EXPECT_CALL(amqp, destroy_envelope(const_cast<amqp_envelope_t*>(static_cast<const amqp_envelope_t*>(env))));
+  bool called = false;
+  EXPECT_TRUE(conn.consumeEnvelope(consumeTimeout, [this, &called] (Envelope env) {
+    EXPECT_CALL(amqp, destroy_envelope(const_cast<amqp_envelope_t*>(static_cast<const amqp_envelope_t*>(env))));
+    called = true;
+  }));
+  EXPECT_TRUE(called);
 }
 
-TEST_F(ConnectionTest, ConsumeEnvelopeBlocking) {
+TEST_F(ConnectionTest, ConsumeEnvelopeWaitForever) {
   auto conn = createSimpleConnection();
 
   amqp_envelope_t* envelope(nullptr);
   EXPECT_CALL(amqp, consume_message(connPtr, _, nullptr, 0))
     .WillOnce(DoAll(SaveArg<1>(&envelope), SetArgPointee<1>(amqp_envelope_t{.channel = 1}),
       Return(amqp_rpc_reply_t{.reply_type = AMQP_RESPONSE_NORMAL })));
-  const auto& result = conn.consume();
-  EXPECT_EQ(result.index(), 1);
-  const auto& env = std::get<1>(result);
-  EXPECT_CALL(amqp, destroy_envelope(const_cast<amqp_envelope_t*>(static_cast<const amqp_envelope_t*>(env))));
+
+  bool called = false;
+  conn.consumeEnvelope([this, &called] (Envelope env) {
+    EXPECT_CALL(amqp, destroy_envelope(const_cast<amqp_envelope_t*>(static_cast<const amqp_envelope_t*>(env))));
+    called = true;
+  });
+  EXPECT_TRUE(called);
+
 }
 
 TEST_F(ConnectionTest, ConsumeEmptyEnvelopeTimeout) {
@@ -267,8 +273,7 @@ TEST_F(ConnectionTest, ConsumeEmptyEnvelopeTimeout) {
   EXPECT_CALL(amqp, consume_message(connPtr, _, Pointee(consumeTv), 0))
     .WillOnce(DoAll(SetArgPointee<1>(amqp_envelope_t{.channel = 0}),
       Return(amqp_rpc_reply_t{.reply_type = AMQP_RESPONSE_NORMAL })));
-  const auto& result = conn.consume(consumeTimeout);
-  EXPECT_EQ(result.index(), 0);
+  EXPECT_FALSE(conn.consumeEnvelope(consumeTimeout, [] (Envelope) {}));
 }
 
 TEST_F(ConnectionTest, ConsumeUnhandledRPCReply) {
@@ -281,7 +286,7 @@ TEST_F(ConnectionTest, ConsumeUnhandledRPCReply) {
   EXPECT_CALL(amqp, consume_message(connPtr, _, Pointee(consumeTv), 0))
     .WillOnce(Return(amqp_rpc_reply_t{.reply_type = AMQP_RESPONSE_SERVER_EXCEPTION }));
 
-  EXPECT_THROW(conn.consume(consumeTimeout), RPCException);
+  EXPECT_THROW(conn.consumeEnvelope(consumeTimeout, [] (Envelope) {}), RPCException);
 }
 
 TEST_F(ConnectionTest, ConsumeUnhandledLibraryError) {
@@ -294,7 +299,7 @@ TEST_F(ConnectionTest, ConsumeUnhandledLibraryError) {
   EXPECT_CALL(amqp, consume_message(connPtr, _, Pointee(consumeTv), 0))
     .WillOnce(Return(amqp_rpc_reply_t{.reply_type = AMQP_RESPONSE_LIBRARY_EXCEPTION, .library_error = AMQP_STATUS_INVALID_PARAMETER }));
 
-  EXPECT_THROW(conn.consume(consumeTimeout), RPCException);
+  EXPECT_THROW(conn.consumeEnvelope(consumeTimeout, [] (Envelope) {}), RPCException);
 }
 
 TEST_F(ConnectionTest, ConsumeLibrarySocketError) {
@@ -307,7 +312,7 @@ TEST_F(ConnectionTest, ConsumeLibrarySocketError) {
   EXPECT_CALL(amqp, consume_message(connPtr, _, Pointee(consumeTv), 0))
     .WillOnce(Return(amqp_rpc_reply_t{.reply_type = AMQP_RESPONSE_LIBRARY_EXCEPTION, .library_error = AMQP_STATUS_SOCKET_ERROR }));
 
-  EXPECT_THROW(conn.consume(consumeTimeout), SocketException);
+  EXPECT_THROW(conn.consumeEnvelope(consumeTimeout, [] (Envelope) {}), SocketException);
 }
 
 TEST_F(ConnectionTest, ConsumeLibraryTimeout) {
@@ -320,8 +325,7 @@ TEST_F(ConnectionTest, ConsumeLibraryTimeout) {
   EXPECT_CALL(amqp, consume_message(connPtr, _, Pointee(consumeTv), 0))
     .WillOnce(DoAll(SetArgPointee<1>(amqp_envelope_t{.channel = 0}),
       Return(amqp_rpc_reply_t{.reply_type = AMQP_RESPONSE_LIBRARY_EXCEPTION, .library_error = AMQP_STATUS_TIMEOUT })));
-  const auto& result = conn.consume(consumeTimeout);
-  EXPECT_EQ(result.index(), 0);
+  EXPECT_FALSE(conn.consumeEnvelope(consumeTimeout, [] (Envelope) {}));
 }
 
 TEST_F(ConnectionTest, ConsumeFrameTimeout) {
@@ -336,8 +340,7 @@ TEST_F(ConnectionTest, ConsumeFrameTimeout) {
       Return(amqp_rpc_reply_t{.reply_type = AMQP_RESPONSE_LIBRARY_EXCEPTION, .library_error = AMQP_STATUS_UNEXPECTED_STATE })));
   EXPECT_CALL(amqp, simple_wait_frame_noblock(connPtr, _, Pointee(consumeTv)))
     .WillOnce(Return(AMQP_STATUS_TIMEOUT));
-  const auto& result = conn.consume(consumeTimeout);
-  EXPECT_EQ(result.index(), 0);
+  EXPECT_FALSE(conn.consumeEnvelope(consumeTimeout, [] (Envelope) {}));
 }
 
 TEST_F(ConnectionTest, ConsumeUnhandledFrameStatus) {
@@ -354,7 +357,7 @@ TEST_F(ConnectionTest, ConsumeUnhandledFrameStatus) {
   EXPECT_CALL(amqp, simple_wait_frame_noblock(connPtr, _, Pointee(consumeTv)))
     .WillOnce(Return(AMQP_STATUS_NO_MEMORY));
   try {
-    conn.consume(consumeTimeout);
+    conn.consumeEnvelope(consumeTimeout, [] (Envelope) {});
     ASSERT_TRUE(false);
   } catch(const FrameStatusException& ex) {
     EXPECT_EQ(ex.status, AMQP_STATUS_NO_MEMORY);
@@ -378,7 +381,7 @@ TEST_F(ConnectionTest, ConsumeUnhandledFrameType) {
   EXPECT_CALL(amqp, simple_wait_frame_noblock(connPtr, _, Pointee(consumeTv)))
     .WillOnce(DoAll(SetArgPointee<1>(amqp_frame_t {.frame_type = 0 }),Return(AMQP_STATUS_OK)));
   try {
-    conn.consume(consumeTimeout);
+    conn.consumeEnvelope(consumeTimeout, [] (Envelope) {});
     ASSERT_TRUE(false);
   } catch(const FrameException& ex) {
     EXPECT_EQ(ex.frame, amqp_frame_t {.frame_type = 0 });
@@ -404,10 +407,12 @@ TEST_F(ConnectionTest, ConsumeAckReceived) {
   EXPECT_CALL(amqp, simple_wait_frame_noblock(connPtr, _, Pointee(consumeTv)))
     .WillOnce(DoAll(SetArgPointee<1>(amqp_frame_t {.frame_type = AMQP_FRAME_METHOD, .payload = { amqp_method_t{.id = AMQP_BASIC_ACK_METHOD, .decoded = &basicAck}}}),Return(AMQP_STATUS_OK)));
 
-  const auto& result = conn.consume(consumeTimeout);
-  EXPECT_EQ(result.index(), 3);
-  const auto& ackMethod = std::get<3>(result);
-  EXPECT_EQ(memcmp(&ackMethod, &basicAck, sizeof(basicAck)), 0);
+  bool called = false;
+  EXPECT_TRUE(conn.consume(consumeTimeout, [] (Envelope) {}, [] (ReturnedMessage) {}, [&called, &basicAck] (amqp_basic_ack_t ackMethod) {
+    EXPECT_EQ(memcmp(&ackMethod, &basicAck, sizeof(basicAck)), 0);
+    called = true;
+  }));
+  EXPECT_TRUE(called);
 }
 
 TEST_F(ConnectionTest, ConsumeMessageReturn) {
@@ -437,12 +442,14 @@ TEST_F(ConnectionTest, ConsumeMessageReturn) {
   EXPECT_CALL(amqp, read_message(connPtr, 15, _, 0))
     .WillOnce(DoAll(SetArgPointee<2>(message), Return(amqp_rpc_reply_t{ .reply_type = AMQP_RESPONSE_NORMAL})));
 
-  const auto& result = conn.consume(consumeTimeout);
-  EXPECT_EQ(result.index(), 2);
-  const auto& returnMethod = std::get<2>(result);
-  EXPECT_EQ(returnMethod.method(), basicReturn);
-  EXPECT_EQ(returnMethod.message(), message);
-  EXPECT_CALL(amqp, destroy_message(const_cast<amqp_message_t*>(static_cast<const amqp_message_t*>(returnMethod.message()))));
+  bool called = false;
+  EXPECT_TRUE(conn.consumeReturnedMessage(consumeTimeout, [this, &called, &basicReturn, &message] (ReturnedMessage returnMethod) {
+    EXPECT_EQ(returnMethod.method(), basicReturn);
+    EXPECT_EQ(returnMethod.message(), message);
+    EXPECT_CALL(amqp, destroy_message(const_cast<amqp_message_t*>(static_cast<const amqp_message_t*>(returnMethod.message()))));
+    called = true;
+  }));
+  EXPECT_TRUE(called);
 }
 
 TEST_F(ConnectionTest, ConsumeFailedMessageReturn) {
@@ -475,7 +482,7 @@ TEST_F(ConnectionTest, ConsumeFailedMessageReturn) {
   EXPECT_CALL(amqp, method_name(_))
     .WillOnce(Return("unit test method name"));
   EXPECT_CALL(amqp, destroy_message(_));
-  EXPECT_THROW(conn.consume(consumeTimeout), RPCException);
+  EXPECT_THROW(conn.consumeEnvelope(consumeTimeout, [] (Envelope) {}), RPCException);
 }
 
 TEST_F(ConnectionTest, ConsumeChannelCloseReceived) {
@@ -495,7 +502,7 @@ TEST_F(ConnectionTest, ConsumeChannelCloseReceived) {
     .WillOnce(DoAll(SetArgPointee<1>(amqp_frame_t {.frame_type = AMQP_FRAME_METHOD, .channel = 11, .payload = { amqp_method_t{.id = AMQP_CHANNEL_CLOSE_METHOD, .decoded = &channelClose}}}),Return(AMQP_STATUS_OK)));
 
   try {
-    conn.consume(consumeTimeout);
+    conn.consumeEnvelope(consumeTimeout, [] (Envelope) {});
     ASSERT_TRUE(false);
   } catch(const ChannelCloseException& ex) {
     EXPECT_EQ(ex.channel, 11);
@@ -520,7 +527,7 @@ TEST_F(ConnectionTest, ConsumeConnectionCloseReceived) {
   EXPECT_CALL(amqp, simple_wait_frame_noblock(connPtr, _, Pointee(consumeTv)))
     .WillOnce(DoAll(SetArgPointee<1>(amqp_frame_t {.frame_type = AMQP_FRAME_METHOD, .channel = 11, .payload = { amqp_method_t{.id = AMQP_CONNECTION_CLOSE_METHOD, .decoded = &connectionClose}}}),Return(AMQP_STATUS_OK)));
 
-  EXPECT_THROW(conn.consume(consumeTimeout), ConnectionCloseException);
+  EXPECT_THROW(conn.consumeEnvelope(consumeTimeout, [] (Envelope) {}), ConnectionCloseException);
 }
 
 TEST_F(ConnectionTest, SetRPCTimeout) {

@@ -4,6 +4,3 @@
 [submodule "dependencies/googletest"]
 	path = dependencies/googletest
 	url = https://github.com/google/googletest.git
-[submodule "dependencies/variant"]
-	path = dependencies/variant
-	url = https://github.com/mpark/variant.git

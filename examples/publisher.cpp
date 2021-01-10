@@ -16,31 +16,14 @@ int main() {
 
   do {
     try {
-      const auto& result = connection.consume(std::chrono::seconds(1));
-      switch(result.index()) {
-        case 1: {
-          const auto& envelope = std::get<1>(result);
-          cout << "Received: " << envelope.body() << endl;
-          if (0 != channel.ack(envelope->delivery_tag, false)) {
-            cout << "Failed to acknowledge envelope!" << endl;
-          }
-        }
-          break;
-        case 2: {
-          const auto& returnedMessage = std::get<2>(result);
-          cout << "returned: " << container<string>(returnedMessage.message()->body)
+      if (!connection.consumeReturnedMessage(std::chrono::seconds(1), [] (ReturnedMessage returnedMessage) {
+        cout << "returned: " << container<string>(returnedMessage.message()->body)
             << " code: " << returnedMessage.method().reply_code
             << " reply_text: " << container<string>(returnedMessage.method().reply_text)
             << " exchange: " << container<string>(returnedMessage.method().exchange)
             << " routing_key: " << container<string>(returnedMessage.method().routing_key)
-            << endl;
-        }
-          break;
-        case 0:
-          cout << "timeout" << endl;
-          break;
-        default:
-          break;
+            << endl;})) {
+        cout << "consume timeout" << endl;
       }
    } catch(rmqcxx::Exception& ex) {
       cerr << "Failed: " << ex.what() << endl;

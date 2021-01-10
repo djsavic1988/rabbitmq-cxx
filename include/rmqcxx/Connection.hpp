@@ -31,18 +31,6 @@ SOFTWARE.
 #include <memory>
 #include <string>
 #include <unordered_map>
-#if __cplusplus < 201703L
-#include <mpark/variant.hpp>
-namespace std {
-
-  template <typename... Ts>
-  using variant = mpark::variant<Ts...>;
-  using mpark::get;
-
-} // namespace std
-#else
-#include <variant>
-#endif
 
 #include <amqp.h>
 #include <amqp_framing.h>
@@ -52,7 +40,6 @@ namespace std {
 #include "Exceptions.hpp"
 #include "Message.hpp"
 #include "ReturnedMessage.hpp"
-#include "Timeout.hpp"
 #include "util.hpp"
 
 namespace rmqcxx {
@@ -64,22 +51,6 @@ class Channel;
  */
 class Connection final {
 public:
-  /**
-   * Consume Result type
-   */
-  using ConsumeResult = std::variant<Timeout, Envelope, ReturnedMessage, ::amqp_basic_ack_t>;
-
-  /**
-   * Enum to make access to the ConsumeResult easier to read
-   *
-   * @note Intentionally not an enum class for easier access
-   */
-  enum ConsumeResultIndex : std::size_t {
-    TimeoutIdx = 0, /// When getting the envelope times out
-    EnvelopeIdx, /// When the result contains an envelope
-    ReturnedMessageIdx, /// When the result contains a returned (NACKed) message
-    AcknowledgeIdx /// When the result contains acknowledge information (Publisher confirms)
-  };
 
   /**
    * Constructs a connection
@@ -259,10 +230,16 @@ public:
    * Consumes broker messages
    *
    * @tparam Duration std::chrono::duration compatible type
+   * @tparam EnvelopeCallback Callable object that accepts an rmqcxx::Envelope (std::function<void(rmqcxx::Envelope)> compatible)
+   * @tparam ReturnedMessageCallback Callable object that accepts an rmqcxx::ReturnedMessage (std::function<void(rmqcxx::ReturnedMessage)> compatible)
+   * @tparam AcknowledgeCallback Callable object that accepts ::amqp_basic_ack_t (std::function<void(amqp_basic_ack_t)> compatible)
    *
    * @param[in] timeout Duration after which this client times out
+   * @param[in] envelopeCallback Callback to call if an envelope was obtained
+   * @param[in] returnedMessageCallback Callback to call if a returned message was received
+   * @param[in] acknowledgeCallback Callback to call if an acknowledgment was received (publisher confirms)
    *
-   * @return Result of consuming depends on the broker state, one value of the varient will be set
+   * @return True if frame(s) was(were) consumed, otherwise false (Timeout)
    *
    * @throw ChannelCloseException When channel for the executed RPC should be closed
    * @throw ConnectionCloseException When connection for the executed RPC should be closed
@@ -271,19 +248,29 @@ public:
    * @throw LibraryException When there is a library exception
    * @throw RPCException For general RPC exception
    * @throw SocketException On socket error
+   *
+   * @note This method uses std::chrono::high_resolution_clock which may cause the method to wait less than suggested if the clock changes.
    */
-  template <typename Duration>
-  ConsumeResult consume(Duration timeout) {
+  template <typename Duration, typename EnvelopeCallback, typename ReturnedMessageCallback, typename AcknowledgeCallback>
+  bool consume(
+    Duration timeout,
+    EnvelopeCallback envelopeCallback,
+    ReturnedMessageCallback returnedMessageCallback,
+    AcknowledgeCallback acknowledgeCallback) {
     auto tv = timeValue(timeout);
-    return consumeImpl(&tv);
+    return consumeImpl(&tv, envelopeCallback, returnedMessageCallback, acknowledgeCallback);
   }
 
   /**
    * Consumes broker messages by blocking until there is an error or a message
    *
-   * @param[in] timeout Duration after which this client times out
+   * @tparam EnvelopeCallback Callable object that accepts an rmqcxx::Envelope (std::function<void(rmqcxx::Envelope)> compatible)
+   * @tparam ReturnedMessageCallback Callable object that accepts an rmqcxx::ReturnedMessage (std::function<void(rmqcxx::ReturnedMessage)> compatible)
+   * @tparam AcknowledgeCallback Callable object that accepts ::amqp_basic_ack_t (std::function<void(amqp_basic_ack_t)> compatible)
    *
-   * @return Result of consuming depends on the broker state, one value of the varient will be set
+   * @param[in] envelopeCallback Callback to call if an envelope was obtained
+   * @param[in] returnedMessageCallback Callback to call if a returned message was received
+   * @param[in] acknowledgeCallback Callback to call if an acknowledgment was received (publisher confirms)
    *
    * @throw ChannelCloseException When channel for the executed RPC should be closed
    * @throw ConnectionCloseException When connection for the executed RPC should be closed
@@ -293,8 +280,228 @@ public:
    * @throw RPCException For general RPC exception
    * @throw SocketException On socket error
    */
-  ConsumeResult consume() {
-    return consumeImpl(nullptr);
+  template <typename EnvelopeCallback, typename ReturnedMessageCallback, typename AcknowledgeCallback>
+  void consume(
+    EnvelopeCallback envelopeCallback,
+    ReturnedMessageCallback returnedMessageCallback,
+    AcknowledgeCallback acknowledgeCallback) {
+    consumeImpl(nullptr, envelopeCallback, returnedMessageCallback, acknowledgeCallback);
+  }
+
+  /**
+   * Consumes envelopes from broker, ignoring other messages/frames
+   *
+   * @tparam Duration std::chrono::duration compatible type
+   * @tparam EnvelopeCallback Callable object that accepts an rmqcxx::Envelope (std::function<void(rmqcxx::Envelope)> compatible)
+   *
+   * @param[in] timeout Duration after which this client times out
+   * @param[in] callback Callback to call if an envelope was obtained
+   *
+   * @return True if frame(s) was(were) consumed, otherwise false (Timeout)
+   *
+   * @throw ChannelCloseException When channel for the executed RPC should be closed
+   * @throw ConnectionCloseException When connection for the executed RPC should be closed
+   * @throw FrameException When a frame exception happens
+   * @throw FrameStatusException When an exception occurs while waiting for a frame
+   * @throw LibraryException When there is a library exception
+   * @throw RPCException For general RPC exception
+   * @throw SocketException On socket error
+   *
+   * @note This method uses std::chrono::high_resolution_clock which may cause the method to wait less than suggested if the clock changes.
+   */
+  template <typename Duration, typename EnvelopeCallback>
+  bool consumeEnvelope(Duration timeout, EnvelopeCallback callback) {
+    bool done = false;
+    auto internalTimeout = std::chrono::duration_cast<std::chrono::high_resolution_clock::duration>(timeout);
+    auto start = std::chrono::high_resolution_clock::now();
+    bool r = false;
+    do {
+      const auto& now = std::chrono::high_resolution_clock::now();
+      if (now < start) {
+        // time changed, set the internalTimeout to 0
+        internalTimeout = decltype(internalTimeout)(0);
+      } else {
+        internalTimeout -= now - start;
+      }
+      r = consume(
+        internalTimeout,
+        [&callback, &done] (Envelope v) mutable { done = true; callback(std::move(v)); },
+        [] (const ReturnedMessage&) {},
+        [] (const ::amqp_basic_ack_t&) {}
+      );
+    } while (r && !done);
+    return r;
+  }
+
+  /**
+   * Consumes envelopes from broker, ignoring other messages/frames
+   *
+   * @tparam EnvelopeCallback Callable object that accepts an rmqcxx::Envelope (std::function<void(rmqcxx::Envelope)> compatible)
+   *
+   * @param[in] callback Callback to call if an envelope was obtained
+   *
+   * @throw ChannelCloseException When channel for the executed RPC should be closed
+   * @throw ConnectionCloseException When connection for the executed RPC should be closed
+   * @throw FrameException When a frame exception happens
+   * @throw FrameStatusException When an exception occurs while waiting for a frame
+   * @throw LibraryException When there is a library exception
+   * @throw RPCException For general RPC exception
+   * @throw SocketException On socket error
+   */
+  template <typename EnvelopeCallback>
+  void consumeEnvelope(EnvelopeCallback callback) {
+    bool done = false;
+    do {
+      consume(
+        [&callback, &done] (Envelope v) mutable { done = true; callback(std::move(v)); },
+        [] (const ReturnedMessage&) {},
+        [] (const ::amqp_basic_ack_t&) {}
+      );
+    } while(!done);
+  }
+
+  /**
+   * Consumes Returned messages from the broker, ignoring other messages/frames
+   *
+   * @tparam Duration std::chrono::duration compatible type
+   * @tparam ReturnedMessageCallback Callable object that accepts an rmqcxx::ReturnedMessage (std::function<void(rmqcxx::ReturnedMessage)> compatible)
+   *
+   * @param[in] timeout Duration after which this client times out
+   * @param[in] callback Callback to call if a returned message was received
+   *
+   * @return True if frame(s) was(were) consumed, otherwise false (Timeout)
+   *
+   * @throw ChannelCloseException When channel for the executed RPC should be closed
+   * @throw ConnectionCloseException When connection for the executed RPC should be closed
+   * @throw FrameException When a frame exception happens
+   * @throw FrameStatusException When an exception occurs while waiting for a frame
+   * @throw LibraryException When there is a library exception
+   * @throw RPCException For general RPC exception
+   * @throw SocketException On socket error
+   *
+   * @note This method uses std::chrono::high_resolution_clock which may cause the method to wait less than suggested if the clock changes.
+   */
+  template <typename Duration, typename ReturnedMessageCallback>
+  bool consumeReturnedMessage(Duration timeout, ReturnedMessageCallback callback) {
+    bool done = false;
+    auto start = std::chrono::high_resolution_clock::now();
+    auto internalTimeout = std::chrono::duration_cast<std::chrono::high_resolution_clock::duration>(timeout);
+    bool r = false;
+    do {
+      const auto& now = std::chrono::high_resolution_clock::now();
+      if (now < start) {
+        // time changed, set the internalTimeout to 0
+        internalTimeout = decltype(internalTimeout)(0);
+      } else {
+        internalTimeout -= now - start;
+      }
+      r = consume(
+        internalTimeout,
+        [] (const Envelope&) { },
+        [&callback, &done] (ReturnedMessage v) mutable { done = true; callback(std::move(v)); },
+        [] (const ::amqp_basic_ack_t&) {}
+      );
+    } while (r && !done);
+    return r;
+  }
+
+  /**
+   * Consumes Returned messages from the broker, ignoring other messages/frames (blocks until a ReturnedMessage is available)
+   *
+   * @tparam ReturnedMessageCallback Callable object that accepts an rmqcxx::ReturnedMessage (std::function<void(rmqcxx::ReturnedMessage)> compatible)
+   *
+   * @param[in] callback Callback to call if a returned message was received
+   *
+   * @throw ChannelCloseException When channel for the executed RPC should be closed
+   * @throw ConnectionCloseException When connection for the executed RPC should be closed
+   * @throw FrameException When a frame exception happens
+   * @throw FrameStatusException When an exception occurs while waiting for a frame
+   * @throw LibraryException When there is a library exception
+   * @throw RPCException For general RPC exception
+   * @throw SocketException On socket error
+   */
+  template <typename ReturnedMessageCallback>
+  void consumeReturnedMessage(ReturnedMessageCallback callback) {
+    bool done = false;
+    do {
+      consume(
+        [] (const Envelope&) {},
+        [&callback, &done] (ReturnedMessage v) mutable { done = true; callback(std::move(v)); },
+        [] (const ::amqp_basic_ack_t&) {}
+      );
+    } while(!done);
+  }
+
+  /**
+   * Consumes acknowledge (publisher confirms) messages from the broker, ignores other types of messages
+   *
+   * @tparam Duration std::chrono::duration compatible type
+   * @tparam AcknowledgeCallback Callable object that accepts ::amqp_basic_ack_t (std::function<void(amqp_basic_ack_t)> compatible)
+   *
+   * @param[in] timeout Duration after which this client times out
+   * @param[in] callback Callback to call if an acknowledgment was received (publisher confirms)
+   *
+   * @return True if frame(s) was(were) consumed, otherwise false (Timeout)
+   *
+   * @throw ChannelCloseException When channel for the executed RPC should be closed
+   * @throw ConnectionCloseException When connection for the executed RPC should be closed
+   * @throw FrameException When a frame exception happens
+   * @throw FrameStatusException When an exception occurs while waiting for a frame
+   * @throw LibraryException When there is a library exception
+   * @throw RPCException For general RPC exception
+   * @throw SocketException On socket error
+   *
+   * @note This method uses std::chrono::high_resolution_clock which may cause the method to wait less than suggested if the clock changes.
+   */
+  template <typename Duration, typename AcknowledgeCallback>
+  bool consumeAcknowledge(Duration timeout, AcknowledgeCallback callback) {
+    bool done = false;
+    auto start = std::chrono::high_resolution_clock::now();
+    auto internalTimeout = std::chrono::duration_cast<std::chrono::high_resolution_clock::duration>(timeout);
+    bool r = false;
+    do {
+      const auto& now = std::chrono::high_resolution_clock::now();
+      if (now < start) {
+        // time changed, set the internalTimeout to 0
+        internalTimeout = decltype(internalTimeout)(0);
+      } else {
+        internalTimeout -= now - start;
+      }
+      r = consume(
+        internalTimeout,
+        [] (const Envelope&) {},
+        [] (const ReturnedMessage&) {},
+        [&callback, &done] (::amqp_basic_ack_t ack) mutable { done = true; callback(std::move(ack)); }
+      );
+    } while (r && !done);
+    return r;
+  }
+
+  /**
+   * Consumes acknowledge (publisher confirms) messages from the broker, ignores other types of messages
+   *
+   * @tparam AcknowledgeCallback Callable object that accepts ::amqp_basic_ack_t (std::function<void(amqp_basic_ack_t)> compatible)
+   *
+   * @param[in] callback Callback to call if an acknowledgment was received (publisher confirms)
+   *
+   * @throw ChannelCloseException When channel for the executed RPC should be closed
+   * @throw ConnectionCloseException When connection for the executed RPC should be closed
+   * @throw FrameException When a frame exception happens
+   * @throw FrameStatusException When an exception occurs while waiting for a frame
+   * @throw LibraryException When there is a library exception
+   * @throw RPCException For general RPC exception
+   * @throw SocketException On socket error
+   */
+  template <typename AcknowledgeCallback>
+  void consumeAcknowledge(AcknowledgeCallback callback) {
+    bool done = false;
+    do {
+      consume(
+        [] (const Envelope&) {},
+        [] (const ReturnedMessage&) {},
+        [&callback, &done] (::amqp_basic_ack_t v) mutable { done = true; callback(std::move(v)); }
+      );
+    } while(!done);
   }
 
   /**
@@ -414,9 +621,16 @@ private:
   /**
    * AMQP Consume implementation
    *
-   * @param[in] tv Timeout, set to nullptr to block until there is a message or an error
+   * @tparam EnvelopeCallback Callable object that accepts an rmqcxx::Envelope
+   * @tparam ReturnedMessageCallback Callable object that accepts an rmqcxx::ReturnedMessage
+   * @tparam AcknowledgeCallback Callable object that accepts ::amqp_basic_ack_t
    *
-   * @return ConsumeResult
+   * @param[in,out] tv Timeout, set to nullptr to block until there is a message or an error
+   * @param[in] envelopeCallback Callback to call if an envelope was obtained (std::function<void(rmqcxx::Envelope)> compatible)
+   * @param[in] returnedMessageCallback Callback to call if a returned message was received (std::function<void(rmqcxx::ReturnedMessage)> compatible)
+   * @param[in] acknowledgeCallback Callback to call if an acknowledgment was received (publisher confirms)  (std::function<void(::amqp_basic_ack_t)> compatible)
+   *
+   * @return True if frame(s) was(were) consumed, otherwise false (Timeout)
    *
    * @throw ChannelCloseException When channel for the executed RPC should be closed
    * @throw ConnectionCloseException When connection for the executed RPC should be closed
@@ -426,26 +640,40 @@ private:
    * @throw RPCException For general RPC exception
    * @throw SocketException On socket error
    *
-   * @note Timeout could be upto double of that set because it is reused as a parameter to wait for a frame in case of AMQP_STATUS_UNEXPECTED_STATE
+   * @note This method uses std::chrono::high_resolution_clock which may cause the method to wait less than suggested if the clock changes.
    */
-  ConsumeResult consumeImpl(timeval* tv) {
+  template <typename EnvelopeCallback, typename ReturnedMessageCallback, typename AcknowledgeCallback>
+  bool consumeImpl(timeval* tv, EnvelopeCallback envelopeCallback, ReturnedMessageCallback returnedMessageCallback, AcknowledgeCallback acknowledgeCallback) {
     Envelope envelope;
+    auto start = std::chrono::high_resolution_clock::now();
     auto reply = ::amqp_consume_message(connection_.get(), static_cast<::amqp_envelope_t*>(envelope), tv, 0 /*Always 0, requested by the library*/);
     switch(reply.reply_type) {
       case AMQP_RESPONSE_NORMAL:
         if (envelope->channel == 0)
-          return Timeout();
-        return envelope;
+          return false;
+        envelopeCallback(std::move(envelope));
+        return true;
       case AMQP_RESPONSE_LIBRARY_EXCEPTION: {
         switch(reply.library_error) {
           case AMQP_STATUS_UNEXPECTED_STATE: {
             ::amqp_frame_t frame;
+            if (nullptr != tv) {
+              const auto& initial = durationValue<std::chrono::microseconds>(*tv);
+              const auto& now = std::chrono::high_resolution_clock::now();
+              if (now < start) {
+                // time changed, we don't know how much, set the tv to 0
+                *tv = ::timeval{.tv_sec = 0, .tv_usec = 0};
+              } else {
+                const auto& spent = start - now;
+                *tv = spent > initial ? ::timeval{.tv_sec = 0, .tv_usec = 0} : timeValue(initial - spent);
+              }
+            }
             auto status = ::amqp_simple_wait_frame_noblock(connection_.get(), &frame, tv);
             switch(status) {
               case AMQP_STATUS_OK:
                 break;
               case AMQP_STATUS_TIMEOUT:
-                return Timeout();
+                return false;
               default:
                 throw FrameStatusException(*this, reply, status, context_ + "Consumer: Received unhandled status when waiting for frame");
             }
@@ -454,11 +682,13 @@ private:
 
             switch(frame.payload.method.id) {
               case AMQP_BASIC_ACK_METHOD:
-                return *static_cast<const ::amqp_basic_ack_t*>(frame.payload.method.decoded);
+                acknowledgeCallback(*static_cast<const ::amqp_basic_ack_t*>(frame.payload.method.decoded));
+                return true;
               case AMQP_BASIC_RETURN_METHOD: {
                 Message message;
                 processReply(context_ + " Consumer (return method): ", ::amqp_read_message(connection_.get(), frame.channel, static_cast<::amqp_message_t*>(message), 0));
-                return ReturnedMessage(std::move(message), *static_cast<const ::amqp_basic_return_t*>(frame.payload.method.decoded));
+                returnedMessageCallback(ReturnedMessage(std::move(message), *static_cast<const ::amqp_basic_return_t*>(frame.payload.method.decoded)));
+                return true;
               }
               case AMQP_CHANNEL_CLOSE_METHOD:
                 throw ChannelCloseException(*this, frame.channel, static_cast<const ::amqp_channel_close_t*>(frame.payload.method.decoded), context_ + "Consumer: Channel close received!");
@@ -471,7 +701,7 @@ private:
           }
             break;
           case AMQP_STATUS_TIMEOUT:
-            return Timeout();
+            return false;
 
           case AMQP_STATUS_SOCKET_ERROR:
             throw SocketException(*this, nullptr, AMQP_STATUS_OK, context_ + "Consumer: Socket Error!");
@@ -483,6 +713,7 @@ private:
       default:
         throw RPCException(*this, reply, context_ + "Consumer: Received an unhandled RPC reply!");
     }
+    return false;
   }
 
   /**

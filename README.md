@@ -9,7 +9,6 @@ This is a C++ language header only AMQP client library. It currently is a wrappe
 Since this is a header only library there is no building and there aren't many dependancies if building and running tests/examples isn't neccecairy. Everything needed (besides the [rabbitmq-c](https://github.com/alanxz/rabbitmq-c) library) is in the include directory. It is expected that the developer would provide include and library paths to link and include [rabbitmq-c](https://github.com/alanxz/rabbitmq-c) in his own project.
 
 ### Dependancies:
-- C++11 and C++14 require [mpark::variant](https://github.com/mpark/variant.git) (which is a submodule of this repository)
 - [rabbitmq-c](https://github.com/alanxz/rabbitmq-c) binaries for runtime and includes at compile time
 
 ## Building and running tests, examples and generating documentation

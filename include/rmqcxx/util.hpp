@@ -46,17 +46,6 @@ static ::amqp_bytes_t bytes(const Container& container) noexcept {
 }
 
 /**
- * Converts C string to AMQP bytes
- * @return An instance of amqp_bytes_t
- */
-static ::amqp_bytes_t bytes(const char* v) noexcept {
-  return ::amqp_bytes_t {
-    .len = ::strlen(v),
-    .bytes = const_cast<char*>(v)
-  };
-}
-
-/**
  * Constructs an STL like container from AMQP bytes
  * @tparam Container STL like container that has value_type and ctor(const value_type*, size_t len)
  * @return Instance of the desired container
@@ -72,13 +61,22 @@ static Container container(const ::amqp_bytes_t& bytes) {
  * @return An instance of ::timeval
  */
 template <typename Duration>
-static ::timeval timeValue(const Duration& duration) noexcept
-{
+static ::timeval timeValue(const Duration& duration) noexcept {
   const auto& seconds = std::chrono::duration_cast<std::chrono::seconds>(duration);
   return ::timeval {
     .tv_sec = seconds.count(),
     .tv_usec = std::chrono::duration_cast<std::chrono::microseconds>(duration - seconds).count()
   };
+}
+
+/**
+ * Converts timeval to duration
+ * @tparam Duration Anything std::chrono::duration compatible
+ * @return An instance of the desired duration
+ */
+template <typename Duration>
+static Duration durationValue(const struct ::timeval& tv) noexcept {
+  return std::chrono::duration_cast<Duration>(std::chrono::seconds(tv.tv_sec)) + std::chrono::duration_cast<Duration>(std::chrono::microseconds(tv.tv_usec));
 }
 
 namespace impl {

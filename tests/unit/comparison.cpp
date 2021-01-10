@@ -27,10 +27,18 @@ SOFTWARE.
 
 #include "comparison.hpp"
 
+#include <chrono>
 #include <cstring>
 
+using std::chrono::microseconds;
+
 bool operator==(const struct timeval& l, const struct timeval& r) {
-  return 0 == ::memcmp(&l, &r, sizeof(l));
+  // in order to support close matches because of internal casts the resolution in 100us
+
+  microseconds lv(l.tv_usec + l.tv_sec * 1000000UL);
+  microseconds rv(r.tv_usec + r.tv_sec * 1000000UL);
+
+  return microseconds(100) > (lv > rv ? lv - rv : rv - lv);
 }
 
 bool operator==(const amqp_bytes_t& l, const amqp_bytes_t& r) {
