@@ -83,7 +83,7 @@ bool operator==(const amqp_field_value_t& l, const amqp_field_value_t& r) {
 
   switch(l.kind) {
     case AMQP_FIELD_KIND_DECIMAL:
-      return 0 == memcmp(&l.value.decimal, &r.value.decimal, sizeof(l.value.decimal));
+      return l.value.decimal.value == r.value.decimal.value && l.value.decimal.decimals == r.value.decimal.decimals;
     case AMQP_FIELD_KIND_BYTES:
     case AMQP_FIELD_KIND_UTF8:
       return l.value.bytes == r.value.bytes;
@@ -171,7 +171,7 @@ ostream& operator<<(ostream& os, const amqp_field_value_t& v) {
   os << '(' << v.kind << ") ";
   switch(v.kind) {
     case AMQP_FIELD_KIND_DECIMAL:
-      os << v.value.decimal.value << " decimals: " << v.value.decimal.decimals;
+      os << v.value.decimal.value << " decimals: " << static_cast<int>(v.value.decimal.decimals);
       break;
     case AMQP_FIELD_KIND_BYTES:
     case AMQP_FIELD_KIND_UTF8:

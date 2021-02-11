@@ -7,6 +7,7 @@ option(BUILD_DOC "Build documentation" OFF)
 option(BUILD_EXAMPLES "Build examples" OFF)
 option(BUILD_UNIT_TESTS "Build unit tests" OFF)
 option(BUILD_PERF_TESTS "Build performance tests" OFF)
+option(COVERAGE_REPORT "Create unit tests coverage report" OFF)
 
 add_library(ilibrabbitmq-cxx INTERFACE)
 add_dependencies(ilibrabbitmq-cxx rabbitmq)
@@ -16,8 +17,11 @@ target_compile_options(ilibrabbitmq-cxx INTERFACE -Wall)
 add_library(librabbitmq-cxx INTERFACE)
 target_link_libraries(librabbitmq-cxx INTERFACE ilibrabbitmq-cxx rabbitmq)
 
-if (BUILD_UNIT_TESTS)
-  add_executable(librabbitmq-cxx-tests tests/unit/main.cpp
+if (BUILD_UNIT_TESTS OR COVERAGE_REPORT)
+  add_library(ilibrabbitmq-cxx-tests INTERFACE)
+  target_sources(ilibrabbitmq-cxx-tests INTERFACE
+    tests/unit/main.cpp
+
     tests/unit/AMQPStructTests.cpp
     tests/unit/ChannelTests.cpp
     tests/unit/ConnectionTests.cpp
@@ -31,11 +35,49 @@ if (BUILD_UNIT_TESTS)
     tests/unit/comparison.cpp
     tests/unit/MockAMQP.cpp
   )
-  target_link_libraries(librabbitmq-cxx-tests PRIVATE ilibrabbitmq-cxx gtest gmock)
-endif (BUILD_UNIT_TESTS)
+  target_link_libraries(ilibrabbitmq-cxx-tests INTERFACE librabbitmq-cxx gtest gmock)
+
+  if (BUILD_UNIT_TESTS)
+    add_executable(librabbitmq-cxx-tests)
+    target_link_libraries(librabbitmq-cxx-tests PRIVATE ilibrabbitmq-cxx-tests)
+  endif(BUILD_UNIT_TESTS)
+
+  if (COVERAGE_REPORT)
+    find_program(GCOV gcov)
+    find_program(LCOV lcov)
+    find_program(GENHTML genhtml)
+    add_executable(librabbitmq-cxx-coverage-bin)
+    target_link_libraries(librabbitmq-cxx-coverage-bin PRIVATE ilibrabbitmq-cxx-tests gcov)
+    target_link_options(librabbitmq-cxx-coverage-bin PRIVATE "--coverage")
+    target_compile_options(librabbitmq-cxx-coverage-bin PRIVATE
+      -g -O0 --coverage -fprofile-arcs -ftest-coverage
+      -fno-inline -fno-inline-small-functions -fno-default-inline
+    )
+
+    add_custom_target(librabbitmq-cxx-coverage-report ALL
+      # Clean
+      COMMAND ${LCOV} --base-directory "${PROJECT_SOURCE_DIR}/include" --directory "$<TARGET_FILE_DIR:librabbitmq-cxx-coverage-bin>" --zerocounters
+
+      # Run
+      COMMAND ${CMAKE_BINARY_DIR}/./librabbitmq-cxx-coverage-bin
+
+      # Collect
+      COMMAND ${LCOV} --capture --base-directory "${PROJECT_SOURCE_DIR}/include" --directory "$<TARGET_FILE_DIR:librabbitmq-cxx-coverage-bin>" --no-external --output coverage.info
+
+      # Generate
+      COMMAND ${GENHTML} coverage.info --output-directory coverage-report
+    )
+  endif(COVERAGE_REPORT)
+endif (BUILD_UNIT_TESTS OR COVERAGE_REPORT)
 
 if (BUILD_PERF_TESTS)
-# TODO: Perf tests
+  add_subdirectory(dependencies/benchmark)
+  add_executable(librabbitmq-cxx-benchmark-consumer tests/performance/consumer.cpp)
+  target_link_libraries(librabbitmq-cxx-benchmark-consumer PRIVATE librabbitmq-cxx benchmark::benchmark)
+
+  add_executable(librabbitmq-cxx-benchmark-publisher tests/performance/publisher.cpp)
+  target_link_libraries(librabbitmq-cxx-benchmark-publisher PRIVATE librabbitmq-cxx benchmark::benchmark)
+
 endif (BUILD_PERF_TESTS)
 
 if (BUILD_EXAMPLES)

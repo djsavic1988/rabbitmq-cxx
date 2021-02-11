@@ -25,39 +25,37 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-#include <iostream>
+#include <chrono>
+
+#include <benchmark/benchmark.h>
+
 #include <rmqcxx.hpp>
 
+using namespace benchmark;
+using namespace rmqcxx;
 using namespace std;
 using namespace std::chrono;
-using namespace rmqcxx;
 
-int main() {
-
+static void simpleDirectPublisher(State& state) {
   Connection connection("172.17.0.2", 5672, "guest", "guest", "/", 0, 131072, 1, seconds(1));
-  Channel channel(connection, 1);
-  Exchange exchange(channel, "publish_exchange");
-  exchange.declare("topic", false, false, false);
+  Channel channel(connection,1);
+  Queue queue(channel, "queue0");
 
-  channel.publish(exchange.name(), "nokey", true, false, "body");
+  queue.declare(false, false, true, true);
 
-  do {
-    try {
-      if (!connection.consumeReturnedMessage(std::chrono::seconds(1), [] (ReturnedMessage returnedMessage) {
-        cout << "returned: " << container<string>(returnedMessage.message()->body)
-            << " code: " << returnedMessage.method().reply_code
-            << " reply_text: " << container<string>(returnedMessage.method().reply_text)
-            << " exchange: " << container<string>(returnedMessage.method().exchange)
-            << " routing_key: " << container<string>(returnedMessage.method().routing_key)
-            << endl;})) {
-        cout << "consume timeout" << endl;
-      }
-   } catch(rmqcxx::Exception& ex) {
-      cerr << "Failed: " << ex.what() << endl;
-      break;
-    }
-  } while (true);
+  const size_t kEnvelopes(10000);
 
-  return 0;
+  queue.consume("", false, false, true);
 
+  for (auto _ : state) {
+    for (size_t i=0; i < kEnvelopes; ++i)
+      channel.publish("", "queue0", false, false, "{}");
+    state.PauseTiming();
+    for (size_t i=0; i < kEnvelopes; ++i)
+      connection.consumeEnvelope([&channel] (const Envelope& envelope) { channel.ack(envelope->delivery_tag, false); });
+    state.ResumeTiming();
+  }
 }
+BENCHMARK(simpleDirectPublisher);
+BENCHMARK_MAIN();
+
