@@ -61,7 +61,7 @@ int main() {
             cout << "Failed to acknowledge envelope!" << endl;}})) {
         cout << "timeout" << endl;
       }
-   } catch(rmqcxx::Exception& ex) {
+   } catch(const rmqcxx::Exception& ex) {
       cerr << "Failed: " << ex.what() << endl;
       break;
     }

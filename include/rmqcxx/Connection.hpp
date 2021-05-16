@@ -317,12 +317,8 @@ public:
     bool r = false;
     do {
       const auto& now = std::chrono::high_resolution_clock::now();
-      if (now < start) {
-        // time changed, set the internalTimeout to 0
-        internalTimeout = decltype(internalTimeout)(0);
-      } else {
-        internalTimeout -= now - start;
-      }
+      // if time changed (now < start), set the internalTimeout to 0
+      internalTimeout = now < start ? decltype(internalTimeout)::zero() : std::max(internalTimeout - (now - start), decltype(internalTimeout)::zero());
       r = consume(
         internalTimeout,
         [&callback, &done] (Envelope v) mutable { done = true; callback(std::move(v)); },
@@ -389,12 +385,8 @@ public:
     bool r = false;
     do {
       const auto& now = std::chrono::high_resolution_clock::now();
-      if (now < start) {
-        // time changed, set the internalTimeout to 0
-        internalTimeout = decltype(internalTimeout)(0);
-      } else {
-        internalTimeout -= now - start;
-      }
+      // if time changed (now < start), set the internalTimeout to 0
+      internalTimeout = now < start ? decltype(internalTimeout)::zero() : std::max(internalTimeout - (now - start), decltype(internalTimeout)::zero());
       r = consume(
         internalTimeout,
         [] (const Envelope&) { },
@@ -461,12 +453,8 @@ public:
     bool r = false;
     do {
       const auto& now = std::chrono::high_resolution_clock::now();
-      if (now < start) {
-        // time changed, set the internalTimeout to 0
-        internalTimeout = decltype(internalTimeout)(0);
-      } else {
-        internalTimeout -= now - start;
-      }
+      // if time changed (now < start), set the internalTimeout to 0
+      internalTimeout = now < start ? decltype(internalTimeout)::zero() : std::max(internalTimeout - (now - start), decltype(internalTimeout)::zero());
       r = consume(
         internalTimeout,
         [] (const Envelope&) {},
@@ -707,7 +695,7 @@ private:
             throw SocketException(*this, nullptr, AMQP_STATUS_OK, context_ + "Consumer: Socket Error!");
 
           default:
-            throw RPCException(*this, reply, context_ + "Consumer: Received an unhandled library exception!");
+            throw RPCException(*this, reply, context_ + "Consumer: Received an unhandled library exception, library_error: " + std::to_string(reply.library_error));
         }
       }
       default:

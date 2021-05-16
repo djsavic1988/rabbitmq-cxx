@@ -88,6 +88,10 @@ if (BUILD_EXAMPLES)
   add_executable(example-publisher examples/publisher.cpp)
   target_link_libraries(example-publisher PRIVATE librabbitmq-cxx)
   set_property(TARGET example-publisher PROPERTY CXX_STANDARD 11)
+
+  add_executable(advanced-example-consumer examples/advconsumer.cpp)
+  target_link_libraries(advanced-example-consumer PRIVATE librabbitmq-cxx)
+  set_property(TARGET advanced-example-consumer PROPERTY CXX_STANDARD 11)
 endif (BUILD_EXAMPLES)
 
 if (BUILD_DOC)
