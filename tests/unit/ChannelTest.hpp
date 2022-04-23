@@ -40,6 +40,9 @@ namespace rmqcxx { namespace unit_tests {
 
     Channel createSimpleChannel(amqp_channel_t chId = 9) {
       channelId = chId;
+      EXPECT_CALL(amqp, maybe_release_buffers(connPtr))
+        .Times(2);
+
       pConn = new Connection(createSimpleConnection());
 
       amqp_channel_open_ok_t openOk {};

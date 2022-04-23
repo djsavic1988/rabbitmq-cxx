@@ -52,11 +52,14 @@ TEST_F(ExchangeTest, Construction) {
 
 TEST_F(ExchangeTest, GenericRPC) {
   auto ch = createSimpleChannel();
+  EXPECT_CALL(amqp, maybe_release_buffers_on_channel(connPtr, channelId))
+    .Times(2);
 
   Exchange ex(ch, "exchange1");
 
   EXPECT_CALL(amqp, get_rpc_reply(connPtr, "rpc without args"))
     .WillOnce(Return(normalReply));
+
   bool called = false;
   ex.rpc([&called, this] (::amqp_connection_state_t state, ::amqp_channel_t channel, amqp_bytes_t exchange) {
     MockAMQP::instance()->lastRPCMethod = "rpc without args";
@@ -84,6 +87,8 @@ TEST_F(ExchangeTest, GenericRPC) {
 
 TEST_F(ExchangeTest, Declare) {
   auto ch = createSimpleChannel();
+  EXPECT_CALL(amqp, maybe_release_buffers_on_channel(connPtr, channelId))
+    .Times(2);
 
   Exchange ex(ch, "exchange1");
 
@@ -110,6 +115,8 @@ TEST_F(ExchangeTest, Declare) {
 
 TEST_F(ExchangeTest, Bind) {
    auto ch = createSimpleChannel();
+   EXPECT_CALL(amqp, maybe_release_buffers_on_channel(connPtr, channelId))
+    .Times(2);
 
   Exchange ex(ch, "exchange1");
 
@@ -136,6 +143,8 @@ TEST_F(ExchangeTest, Bind) {
 
 TEST_F(ExchangeTest, Unbind) {
   auto ch = createSimpleChannel();
+  EXPECT_CALL(amqp, maybe_release_buffers_on_channel(connPtr, channelId))
+    .Times(2);
 
   Exchange ex(ch, "exchange1");
 
@@ -162,6 +171,9 @@ TEST_F(ExchangeTest, Unbind) {
 
 TEST_F(ExchangeTest, Remove) {
   auto ch = createSimpleChannel();
+  EXPECT_CALL(amqp, maybe_release_buffers_on_channel(connPtr, channelId))
+    .Times(2);
+
   Exchange ex(ch, "exchange1");
   EXPECT_CALL(amqp, get_rpc_reply(connPtr, "exchange_delete"))
     .Times(2)

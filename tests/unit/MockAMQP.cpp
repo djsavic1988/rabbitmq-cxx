@@ -178,6 +178,14 @@ amqp_rpc_reply_t amqp_login_with_properties(amqp_connection_state_t state, char 
   return MockAMQP::instance()->login_with_properties(state, vhost, channelMax, frameMax, heartbeat, clientProperties, saslMethod, arguments);
 }
 
+void amqp_maybe_release_buffers(amqp_connection_state_t state) {
+  return MockAMQP::instance()->maybe_release_buffers(state);
+}
+
+void amqp_maybe_release_buffers_on_channel(amqp_connection_state_t state, amqp_channel_t channel) {
+  return MockAMQP::instance()->maybe_release_buffers_on_channel(state, channel);
+}
+
 char const* amqp_method_name(amqp_method_number_t methodNumber) {
   return MockAMQP::instance()->method_name(methodNumber);
 }

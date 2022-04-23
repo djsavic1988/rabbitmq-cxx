@@ -54,6 +54,8 @@ TEST_F(QueueTest, Construction) {
 
 TEST_F(QueueTest, GenericRPC) {
   auto ch = createSimpleChannel();
+  EXPECT_CALL(amqp, maybe_release_buffers_on_channel(connPtr, channelId))
+    .Times(2);
 
   Queue q(ch, "q0");
 
@@ -86,6 +88,8 @@ TEST_F(QueueTest, GenericRPC) {
 
 TEST_F(QueueTest, Declare) {
   auto ch = createSimpleChannel();
+  EXPECT_CALL(amqp, maybe_release_buffers_on_channel(connPtr, channelId))
+    .Times(2);
 
   EXPECT_CALL(amqp, get_rpc_reply(connPtr, "queue_declare"))
     .Times(2)
@@ -111,6 +115,8 @@ TEST_F(QueueTest, Declare) {
 
 TEST_F(QueueTest, Bind) {
   auto ch = createSimpleChannel();
+  EXPECT_CALL(amqp, maybe_release_buffers_on_channel(connPtr, channelId))
+    .Times(2);
 
   EXPECT_CALL(amqp, get_rpc_reply(connPtr, "queue_bind"))
     .Times(2)
@@ -140,6 +146,8 @@ TEST_F(QueueTest, Bind) {
 
 TEST_F(QueueTest, Unbind) {
   auto ch = createSimpleChannel();
+  EXPECT_CALL(amqp, maybe_release_buffers_on_channel(connPtr, channelId))
+    .Times(2);
 
   EXPECT_CALL(amqp, get_rpc_reply(connPtr, "queue_unbind"))
     .Times(2)
@@ -169,6 +177,8 @@ TEST_F(QueueTest, Unbind) {
 
 TEST_F(QueueTest, Consume) {
   auto ch = createSimpleChannel();
+  EXPECT_CALL(amqp, maybe_release_buffers_on_channel(connPtr, channelId))
+    .Times(2);
 
   EXPECT_CALL(amqp, get_rpc_reply(connPtr, "basic_consume"))
     .Times(2)
@@ -197,6 +207,8 @@ TEST_F(QueueTest, Consume) {
 
 TEST_F(QueueTest, Remove) {
   auto ch = createSimpleChannel();
+  EXPECT_CALL(amqp, maybe_release_buffers_on_channel(connPtr, channelId))
+    .Times(2);
 
   EXPECT_CALL(amqp, get_rpc_reply(connPtr, "queue_delete"))
     .Times(2)
@@ -218,6 +230,7 @@ TEST_F(QueueTest, Remove) {
 
 TEST_F(QueueTest, Purge) {
   auto ch = createSimpleChannel();
+  EXPECT_CALL(amqp, maybe_release_buffers_on_channel(connPtr, channelId));
 
   EXPECT_CALL(amqp, get_rpc_reply(connPtr, "queue_purge"))
     .WillOnce(Return(normalReply));

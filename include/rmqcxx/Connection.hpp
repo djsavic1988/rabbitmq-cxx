@@ -223,7 +223,7 @@ public:
    */
   template <typename Function, typename... Args>
   auto rpc(const Function& f, Args&&... args) -> decltype(f(::amqp_connection_state_t(), std::forward<Args>(args)...)) {
-    return rpc("", f, std::forward<Args>(args)...);
+    return rpc(true, "", f, std::forward<Args>(args)...);
   }
 
   /**
@@ -541,7 +541,7 @@ private:
     if (!connection_)
       return;
     try {
-      rpc(::amqp_connection_close, AMQP_REPLY_SUCCESS); // gracefully close
+      rpc(false, this->context_, ::amqp_connection_close, AMQP_REPLY_SUCCESS); // gracefully close, the release will be handled by the amqp_destroy_connection upon destruction
     } catch(...) {
 
     }
@@ -565,10 +565,12 @@ private:
    * @throw RPCException For general RPC exception
    */
   template <typename Function, typename... Args>
-  auto rpc(const std::string& context, const Function& f, Args&&... args) -> decltype(f(::amqp_connection_state_t(), std::forward<Args>(args)...)) {
+  auto rpc(bool maybeRelease, const std::string& context, const Function& f, Args&&... args) -> decltype(f(::amqp_connection_state_t(), std::forward<Args>(args)...)) {
     const auto& c = connection_.get();
-    defer g{ [this, c, context] () {
+    defer g{ [this, c, context, maybeRelease] () {
       processReply(context_ + context, ::amqp_get_rpc_reply(c));
+      // Most of the exposed RPCs (if not all) use amqp_simple_rpc_decoded which leads to the allocation in the pool
+      if (maybeRelease) ::amqp_maybe_release_buffers(c);
     }};
     return f(c, std::forward<Args>(args)...);
   }
@@ -629,9 +631,15 @@ private:
    * @throw SocketException On socket error
    *
    * @note This method uses std::chrono::high_resolution_clock which may cause the method to wait less than suggested if the clock changes.
+   * @note This method calls amqp_maybe_release_buffers after it has completed. Because of the way rabbitmq-c operates it is not trivial to know when to call this exactly but this seems like a logical place
    */
   template <typename EnvelopeCallback, typename ReturnedMessageCallback, typename AcknowledgeCallback>
   bool consumeImpl(timeval* tv, EnvelopeCallback envelopeCallback, ReturnedMessageCallback returnedMessageCallback, AcknowledgeCallback acknowledgeCallback) {
+
+    defer g([this] () {
+      ::amqp_maybe_release_buffers(connection_.get()); // Released here because of the calls to amqp_simple_wait_frame_noblock either directly or via amq_consume_message
+    });
+
     Envelope envelope;
     auto start = std::chrono::high_resolution_clock::now();
     auto reply = ::amqp_consume_message(connection_.get(), static_cast<::amqp_envelope_t*>(envelope), tv, 0 /*Always 0, requested by the library*/);

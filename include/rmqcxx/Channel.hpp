@@ -53,7 +53,7 @@ public:
     channel_(channel),
     context_(std::string("Channel(") + std::to_string(channel) + "): "),
     moved_(false) {
-    connection.rpc(this->context_, ::amqp_channel_open, channel);
+    connection_.rpc(true, this->context_, ::amqp_channel_open, channel_);
   }
 
   /**
@@ -145,7 +145,7 @@ public:
    */
   template <typename Function, typename... Args>
   auto rpc(const Function& f, Args&&... args) -> decltype(f(::amqp_connection_state_t(), ::amqp_channel_t(), std::forward<Args>(args)...)) {
-    return connection_.rpc(this->context_, f, channel_, std::forward<Args>(args)...);
+   return rpc(this->context_, f, std::forward<Args>(args)...);
   }
 
   /**
@@ -246,7 +246,10 @@ private:
    */
   template <typename Function, typename... Args>
   auto rpc(const std::string& context, const Function& f, Args&&... args) -> decltype(f(::amqp_connection_state_t(), ::amqp_channel_t(), std::forward<Args>(args)...)) {
-    return connection_.rpc(this->context_ + context, f, channel_, std::forward<Args>(args)...);
+    defer g([this] () {
+      ::amqp_maybe_release_buffers_on_channel(static_cast<amqp_connection_state_t>(connection_), channel_);
+    });
+    return connection_.rpc(false, this->context_ + context, f, channel_, std::forward<Args>(args)...);
   }
 
   /**

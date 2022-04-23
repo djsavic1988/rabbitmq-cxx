@@ -68,6 +68,9 @@ TEST_F(ChannelTest, MoveConstructionTest) {
 TEST_F(ChannelTest, Acknowledge) {
   auto ch = createSimpleChannel();
 
+  EXPECT_CALL(amqp, maybe_release_buffers_on_channel(connPtr, channelId))
+    .Times(2);
+
   EXPECT_CALL(amqp, basic_ack(connPtr, channelId, 10UL, false))
     .WillOnce(Return(1));
   EXPECT_CALL(amqp, get_rpc_reply(connPtr, "basic_ack"))
@@ -83,6 +86,9 @@ TEST_F(ChannelTest, Acknowledge) {
 
 TEST_F(ChannelTest, Nack) {
   auto ch = createSimpleChannel();
+
+  EXPECT_CALL(amqp, maybe_release_buffers_on_channel(connPtr, channelId))
+    .Times(4);
 
   uint64_t tag(66);
   int rv = 1;
@@ -120,6 +126,9 @@ TEST_F(ChannelTest, Nack) {
 TEST_F(ChannelTest, GenericRPC) {
   auto ch = createSimpleChannel();
 
+  EXPECT_CALL(amqp, maybe_release_buffers_on_channel(connPtr, channelId))
+    .Times(2);
+
   EXPECT_CALL(amqp, get_rpc_reply(connPtr, "rpc without args"))
     .WillOnce(Return(normalReply));
   bool called = false;
@@ -147,6 +156,9 @@ TEST_F(ChannelTest, GenericRPC) {
 
 TEST_F(ChannelTest, QoS) {
   auto ch = createSimpleChannel();
+  EXPECT_CALL(amqp, maybe_release_buffers_on_channel(connPtr, channelId))
+    .Times(2);
+
   EXPECT_CALL(amqp, get_rpc_reply(connPtr, "basic_qos"))
     .Times(2)
     .WillRepeatedly(Return(normalReply));
@@ -160,6 +172,9 @@ TEST_F(ChannelTest, QoS) {
 
 TEST_F(ChannelTest, Flow) {
   auto ch = createSimpleChannel();
+  EXPECT_CALL(amqp, maybe_release_buffers_on_channel(connPtr, channelId))
+    .Times(2);
+
   EXPECT_CALL(amqp, get_rpc_reply(connPtr, "channel_flow"))
     .Times(2)
     .WillRepeatedly(Return(normalReply));
@@ -177,6 +192,10 @@ TEST_F(ChannelTest, Flow) {
 
 TEST_F(ChannelTest, Recover) {
   auto ch = createSimpleChannel();
+
+  EXPECT_CALL(amqp, maybe_release_buffers_on_channel(connPtr, channelId))
+    .Times(2);
+
   EXPECT_CALL(amqp, get_rpc_reply(connPtr, "basic_recover"))
     .Times(2)
     .WillRepeatedly(Return(normalReply));
@@ -194,8 +213,11 @@ TEST_F(ChannelTest, Recover) {
 
 TEST_F(ChannelTest, Publish) {
   auto ch = createSimpleChannel();
+  EXPECT_CALL(amqp, maybe_release_buffers_on_channel(connPtr, channelId))
+    .Times(3);
 
   EXPECT_CALL(amqp, get_rpc_reply(connPtr, "basic_publish"))
+    .Times(3)
     .WillRepeatedly(Return(normalReply));
 
   amqp_basic_properties_t props{0};

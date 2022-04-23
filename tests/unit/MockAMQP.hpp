@@ -66,6 +66,8 @@ namespace rmqcxx { namespace unit_tests {
     MOCK_METHOD1(get_rpc_timeout, struct timeval*(amqp_connection_state_t));
     MOCK_METHOD7(login, amqp_rpc_reply_t(amqp_connection_state_t, char const*, int, int, int, amqp_sasl_method_enum, const std::vector<const char*>&));
     MOCK_METHOD8(login_with_properties, amqp_rpc_reply_t(amqp_connection_state_t, char const*, int, int, int, const amqp_table_t*, amqp_sasl_method_enum, const std::vector<const char*>&));
+    MOCK_METHOD1(maybe_release_buffers, void(amqp_connection_state_t));
+    MOCK_METHOD2(maybe_release_buffers_on_channel, void(amqp_connection_state_t, amqp_channel_t));
     MOCK_METHOD1(method_name, char const*(amqp_method_number_t));
     MOCK_METHOD0(new_connection, amqp_connection_state_t());
     MOCK_METHOD6(queue_bind, amqp_queue_bind_ok_t*(amqp_connection_state_t, amqp_channel_t, amqp_bytes_t, amqp_bytes_t, amqp_bytes_t, amqp_table_t));
